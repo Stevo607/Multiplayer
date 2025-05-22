@@ -1,0 +1,902 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quality Jeopardy - Multi-Player Edition</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Link to your external CSS file -->
+    <link rel="stylesheet" href="style.css">
+    <!-- Include Socket.IO Client Library -->
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+
+<body>
+    <header>
+        <h1 id="game-title">QUALITY JEOPARDY</h1>
+    </header>
+
+    <!-- Combined Tab and Global Controls Navigation -->
+    <div class="tabs">
+        <button class="tab-button active" data-tab="game-tab">Game</button>
+        <button class="tab-button" data-tab="score-history-tab">Score History</button>
+        <button class="tab-button" data-tab="high-scores-tab">High Scores</button>
+        <label for="music-toggle">Music</label>
+        <input type="checkbox" id="music-toggle" checked />
+        <button id="show-final-jeopardy" disabled>Final Jeopardy</button>
+    </div>
+
+    <!-- Game Tab Content -->
+    <div id="game-tab" class="tab-content active">
+        <div id="game-controls-wrapper">
+            <!-- Player Setup and Management -->
+            <section id="player-panel" aria-label="Player Management">
+                <div id="player-setup">
+                    <div class="controls">
+                        <input id="player-name" type="text" placeholder="Player Name" aria-label="Player Name" />
+                        <button id="add-player">Add Player</button>
+                        <button id="start-game" disabled>Start Game</button>
+                    </div>
+                </div>
+                <div id="player-list"><!-- Player cards will be added here by JS --></div>
+            </section>
+
+            <!-- Score Panel -->
+            <section id="score-panel" aria-label="Score Control Panel" style="display: none;">
+                <div id="score-display" aria-live="polite">Player: Score $0</div>
+                <div class="controls">
+                    <input id="manual-score" type="number" step="100" aria-label="Manual score adjustment for current player" placeholder="Set Score" />
+                    <button id="apply-score" aria-label="Apply manual score to current player">Update Player Score</button>
+                </div>
+                <div class="controls">
+                    <button id="undo-score" disabled>Undo Last Score</button>
+                    <button id="reset-all-scores" disabled>Reset All Scores</button>
+                    <button id="new-game">New Game</button>
+                </div>
+                 <div class="controls" id="steal-controls" style="display: none;">
+                      <button id="no-other-takers-btn">No Other Takers / Pass</button>
+                 </div>
+                 <!-- NEW: Buzzer Button -->
+                 <div class="controls">
+                     <button id="buzzer-button" disabled style="font-size: 1.5rem; padding: 0.8rem 1.5rem; background-color: #ffeb3b; color: #1e3a8a; border-color: #fde047; font-weight: bold;">BUZZ IN!</button>
+                 </div>
+            </section>
+        </div><!-- End of game-controls-wrapper -->
+
+        <!-- NEW: Question Display Area -->
+        <section id="question-display-area">
+            <div id="current-question-text">(Question will appear here when selected)</div>
+        </section>
+
+        <!-- Final Jeopardy Section -->
+        <section id="final-jeopardy" aria-label="Final Jeopardy Round">
+             <h2>FINAL JEOPARDY</h2>
+            <div id="final-category">Category: Loading...</div>
+            <div id="final-question" style="display: none;">Question text...</div>
+            <button id="reveal-final-question">Reveal Question</button>
+            <div class="final-wagers" id="final-wagers"></div>
+            <div class="controls">
+                <button id="submit-final-wagers" style="display: none;">Lock In Wagers</button>
+                <button id="judge-final-answers" style="display: none;">Judge Final Answers</button>
+            </div>
+        </section>
+
+        <!-- Audio Elements -->
+        <audio id="bg-music" src="sounds/Jeopardy - 2008 - Opening.mp3" loop preload="auto"></audio>
+        <audio id="correct-sound" src="sounds/correct.mp3" preload="auto"></audio>
+        <audio id="wrong-sound" src="sounds/wrong.mp3" preload="auto"></audio>
+        <audio id="daily-double-sound" src="sounds/daily_double.mp3" preload="auto"></audio>
+        <audio id="final-jeopardy-sound" src="sounds/final_jeopardy.mp3" preload="auto"></audio>
+        <!-- Add a buzzer sound if you have one -->
+        <audio id="buzzer-sound" src="sounds/buzzer.mp3" preload="auto"></audio>
+
+
+        <!-- Game Board -->
+        <section id="board" aria-label="Jeopardy Game Board" style="display: none;"></section>
+        <div id="victory" role="alert" style="display: none;">Cleared!</div> <!-- Kept element but hide it -->
+
+
+    </div><!-- End of game-tab -->
+
+    <!-- Score History Tab Content -->
+    <div id="score-history-tab" class="tab-content">
+         <section id="score-history-container">
+             <h2>Score Progression</h2>
+            <div id="score-history-chart-container">
+                <canvas id="score-history-chart"></canvas>
+                 <p id="chart-placeholder-text">(Score history will appear here)</p>
+            </div>
+        </section>
+    </div><!-- End of score-history-tab -->
+
+    <!-- High Scores Tab Content -->
+    <div id="high-scores-tab" class="tab-content">
+         <section id="high-scores">
+             <h2>High Scores</h2>
+            <ul id="high-scores-list">
+                <li>No scores saved yet.</li>
+            </ul>
+        </section>
+    </div><!-- End of high-scores-tab -->
+
+    <!-- Results Modal -->
+    <div id="results-modal" class="modal">
+        <div class="modal-content">
+             <span class="modal-close" title="Close">×</span>
+            <h2>Game Results</h2>
+            <div id="final-results"></div>
+            <button id="save-high-scores">Save to High Scores</button>
+        </div>
+    </div>
+
+    <!-- ********** START COMPLETE SCRIPT ********** -->
+    <script type="module">
+        // --- Constants ---
+        const STORAGE_KEY_SCORES = 'quality_jeopardy_high_scores_v1'; // No game progress storage on client now
+        // Player colors are now handled by the server for consistency
+        // All game data (categories, questions, FJ, etc.) is now authoritative on the server.
+        const MIN_WAGER = 5;
+        const DAILY_DOUBLE_MAX_WAGER_BASE = 1000;
+
+
+        // --- Client-side Game State (Mirror of server, updated via broadcasts) ---
+        // This object will be updated by server messages
+        let game = {
+            gameStarted: false,
+            players: [],
+            currentPlayerId: null,
+            currentBuzzerPlayerId: null, // Who buzzed in
+            boardState: {},
+            activeCardKey: null,
+            currentQuestionText: null,
+            currentWager: 0,
+            historyStackLength: 0, // Client only needs length to enable/disable undo
+            answeredCluesCount: 0,
+            turnCounter: 0,
+            scoreHistory: {},
+            finalJeopardyData: null // Simplified data for client display
+        };
+
+        // --- Client-specific variables ---
+        let socket; // Socket.IO connection
+        let myPlayerId = null; // This client's assigned player ID from the server
+        let myPlayerName = null; // This client's display name
+        const totalClues = 6 * 5; // Fixed total clues for board completion check
+
+
+        // --- DOM References ---
+        const boardElement = document.getElementById('board');
+        const victoryElement = document.getElementById('victory');
+        const musicElement = document.getElementById('bg-music');
+        const musicToggleElement = document.getElementById('music-toggle');
+        const addPlayerBtnElement = document.getElementById('add-player');
+        const startGameBtnElement = document.getElementById('start-game');
+        const playerNameInputElement = document.getElementById('player-name');
+        const playerListElement = document.getElementById('player-list');
+        const scorePanelElement = document.getElementById('score-panel');
+        const scoreDisplayElement = document.getElementById('score-display');
+        const manualScoreInputElement = document.getElementById('manual-score');
+        const applyScoreBtnElement = document.getElementById('apply-score');
+        const undoBtnElement = document.getElementById('undo-score');
+        const resetScoresBtnElement = document.getElementById('reset-all-scores');
+        const newGameBtnElement = document.getElementById('new-game');
+        const showFinalJeopardyBtnElement = document.getElementById('show-final-jeopardy');
+        const finalJeopardySectionElement = document.getElementById('final-jeopardy');
+        const finalCategoryElement = document.getElementById('final-category');
+        const finalQuestionElement = document.getElementById('final-question');
+        const revealFinalQuestionBtnElement = document.getElementById('reveal-final-question');
+        const submitFinalWagersBtnElement = document.getElementById('submit-final-wagers');
+        const judgeFinalAnswersBtnElement = document.getElementById('judge-final-answers');
+        const finalWagersContainerElement = document.getElementById('final-wagers');
+        const resultsModalElement = document.getElementById('results-modal');
+        const finalResultsElement = document.getElementById('final-results');
+        const saveHighScoresBtnElement = document.getElementById('save-high-scores');
+        const modalCloseElement = document.querySelector('.modal-close');
+        const scoreHistoryContainerElement = document.getElementById('score-history-container');
+        const scoreHistoryChartCanvas = document.getElementById('score-history-chart');
+        const chartPlaceholderText = document.getElementById('chart-placeholder-text');
+        const highScoresListElement = document.getElementById('high-scores-list');
+        const correctSound = document.getElementById('correct-sound');
+        const wrongSound = document.getElementById('wrong-sound');
+        const dailyDoubleSound = document.getElementById('daily_double-sound');
+        const finalJeopardySound = document.getElementById('final_jeopardy-sound');
+        const buzzerSound = document.getElementById('buzzer-sound'); // NEW buzzer sound
+        const stealControlsElement = document.getElementById('steal-controls');
+        const noOtherTakersBtnElement = document.getElementById('no-other-takers-btn');
+        const questionDisplayAreaElement = document.getElementById('question-display-area');
+        const currentQuestionTextElement = document.getElementById('current-question-text');
+        const buzzerButton = document.getElementById('buzzer-button'); // NEW Buzzer button
+
+
+        // --- Utility Functions ---
+        // These now use the client's `game.players` array
+        function getPlayerById(playerId) { return game.players.find(p => p.id === playerId); }
+
+        // Play sound function now accepts an ID to identify the audio element
+        function playSound(audioElementId) {
+            const audioElement = document.getElementById(audioElementId);
+            if (audioElement && typeof audioElement.play === 'function' && musicToggleElement?.checked) {
+                audioElement.currentTime = 0;
+                audioElement.play().catch(e => console.warn("Audio play failed:", audioElement.id, e.message));
+            }
+        }
+
+        function launchConfetti() { const cC=100; const cCo=document.body; for (let i = 0; i < cC; i++) { const c = document.createElement('div'); c.className = 'confetti'; c.style.left = Math.random() * 100 + 'vw'; const colors = ['#4caf50', '#2196f3', '#ff9800', '#e91e63', '#9c27b0', '#00bcd4', '#f44336', '#ffc107']; c.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)]; const aD = Math.random() * 3 + 2; c.style.animationDuration = aD + 's'; c.style.animationDelay = Math.random() * 0.5 + 's'; cCo.appendChild(c); setTimeout(() => { c.remove(); }, (aD + 1) * 1000); } }
+
+        function speakQuestion(text) {
+            if (!('speechSynthesis' in window)) {
+                console.warn('Speech synthesis not supported by this browser.');
+                return;
+            }
+            if (!musicToggleElement || !musicToggleElement.checked) {
+                console.log('Speech synthesis skipped (music/speech toggle is off).');
+                return;
+            }
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(text);
+            window.speechSynthesis.speak(utterance);
+        }
+
+        // --- Question Display ---
+        function showQuestionDisplay(text) {
+             if (currentQuestionTextElement && questionDisplayAreaElement) {
+                  currentQuestionTextElement.textContent = text;
+                  questionDisplayAreaElement.style.display = 'block';
+             }
+        }
+        function hideQuestionDisplay() {
+             if (currentQuestionTextElement && questionDisplayAreaElement) {
+                  currentQuestionTextElement.textContent = ''; // Clear text
+                  questionDisplayAreaElement.style.display = 'none';
+             }
+        }
+
+        // Controls card clickability and visual feedback on the board
+        function updateBoardInteractiveState() {
+            const cards = boardElement.querySelectorAll('.card');
+            const isQuestionCurrentlyActive = game.activeCardKey !== null;
+
+            cards.forEach(card => {
+                const cardStateKey = card.dataset.stateKey;
+                const state = game.boardState[cardStateKey] || {};
+
+                // Remove all previous dynamic classes and listeners
+                card.classList.remove('player-turn-active-card', 'pending-steal', 'flipped', 'disabled');
+                card.removeEventListener('click', handleCardClick);
+                card.style.cursor = 'default';
+
+                const cardFront = card.querySelector('.card-front');
+                const judgeButtons = card.querySelector('.judge-buttons');
+                if (judgeButtons) judgeButtons.style.display = 'none';
+
+                // 1. Handle already answered cards
+                if (state.state === 'correct' || state.state === 'wrong') {
+                    card.classList.add('disabled', state.state);
+                    cardFront.textContent = '';
+                    cardFront.classList.add('empty-value');
+                    card.classList.add('flipped'); // Keep answered cards visually flipped
+                    return; // Skip further processing for answered cards
+                }
+
+                // 2. Handle the currently active question card
+                if (isQuestionCurrentlyActive && cardStateKey === game.activeCardKey) {
+                    card.classList.add('flipped');
+                    // Fill question text if not already
+                    const questionTextDiv = card.querySelector('.question-text');
+                    if (questionTextDiv && questionTextDiv.textContent !== game.currentQuestionText) {
+                         questionTextDiv.textContent = game.currentQuestionText;
+                    }
+
+                    if (game.currentBuzzerPlayerId === null) {
+                        // Question is open for buzzing, card might glow
+                        card.classList.add('pending-steal'); // Re-use pending-steal for visual glow when open for buzzing
+                    } else {
+                        // Someone has buzzed in, card should not glow
+                        card.classList.remove('pending-steal');
+                        // If *this* client is the host (manual role for now), show judge buttons
+                        // This simplistic 'host' check would ideally be based on a server-assigned role.
+                        // For now, if judge buttons should be visible, they are.
+                        if (judgeButtons) judgeButtons.style.display = 'flex';
+                    }
+                    return; // Skip further processing for active card
+                }
+
+                // 3. Handle cards available for picking (when no question is active)
+                if (!isQuestionCurrentlyActive) {
+                    if (myPlayerId === game.currentPlayerId) {
+                        // This client is the current player whose turn it is to pick a question
+                        card.addEventListener('click', handleCardClick); // Enable click for selecting question
+                        card.classList.add('player-turn-active-card'); // Add visual cue
+                        card.style.cursor = 'pointer';
+                    } else {
+                        // Not current picker, card is still clickable but won't do anything for this client
+                        // It will appear 'disabled' for picking.
+                        card.classList.add('disabled');
+                    }
+                }
+            });
+
+            // Update buzzer button state
+            if (game.gameStarted && game.activeCardKey !== null && game.currentBuzzerPlayerId === null) {
+                buzzerButton.disabled = false; // Buzzer is open for anyone
+            } else {
+                buzzerButton.disabled = true; // Buzzer is closed
+            }
+        }
+
+
+        function updatePlayerCards() {
+            if (!playerListElement) return;
+            playerListElement.innerHTML = '';
+            game.players.forEach(player => {
+                const card = document.createElement('div');
+                card.className = 'player-card';
+                card.dataset.playerId = player.id;
+
+                const indicator = document.createElement('div');
+                indicator.className = 'player-indicator';
+                // Player colors are now part of the player object from the server
+                indicator.style.backgroundColor = player.color;
+
+                const nameElem = document.createElement('div');
+                nameElem.className = 'player-name';
+                nameElem.textContent = player.name || 'Unnamed Player';
+
+                const scoreElem = document.createElement('div');
+                scoreElem.className = 'player-score';
+                scoreElem.textContent = `$${player.score}`;
+
+                card.appendChild(indicator);
+                card.appendChild(nameElem);
+                card.appendChild(scoreElem);
+
+                card.removeEventListener('click', handleHostPlayerSelection); // Remove old listener
+                card.classList.remove('selectable-player', 'failed-attempt', 'host-selectable', 'active-player');
+
+                // Active player highlight (who picks question next)
+                if (player.id === game.currentPlayerId && game.gameStarted) {
+                    card.classList.add('active-player');
+                }
+
+                // Host can manually change active player IF no question is active.
+                if (game.gameStarted && !game.activeCardKey && finalJeopardySectionElement.style.display !== 'block') {
+                    card.classList.add('host-selectable');
+                    card.style.cursor = 'pointer';
+                    card.addEventListener('click', handleHostPlayerSelection);
+                } else {
+                    card.style.cursor = 'default';
+                }
+
+                // Highlight if this player has buzzed in (for all clients to see)
+                if (player.id === game.currentBuzzerPlayerId) {
+                    card.style.border = '3px solid gold'; // Visual cue for who buzzed in
+                } else {
+                    card.style.border = '';
+                }
+
+                // Mark failed players for the current question
+                if (game.activeCardKey && game.boardState[game.activeCardKey]?.failedPlayerIds?.includes(player.id)) {
+                    card.classList.add('failed-attempt');
+                }
+
+                playerListElement.appendChild(card);
+            });
+        }
+
+
+        function updateScoreDisplay() {
+            if (!scoreDisplayElement) return;
+            let mainText = "";
+            let statusText = "";
+
+            const activePlayer = getPlayerById(game.currentPlayerId);
+            if (activePlayer && game.gameStarted) {
+                mainText = `Turn: ${activePlayer.name} | Score: $${activePlayer.score}`;
+            } else if (!game.gameStarted && game.players.length === 0) {
+                 mainText = "Add players and start game";
+            } else if (!game.gameStarted && game.players.length > 0) {
+                 mainText = "Game not started. Click 'Start Game'";
+            } else {
+                mainText = "Game Over";
+            }
+
+
+            // Status text based on global game state
+            if (game.activeCardKey !== null) { // A question is currently active
+                if (game.currentBuzzerPlayerId === null) {
+                    statusText = "Buzz in!";
+                } else {
+                    const buzzedPlayer = getPlayerById(game.currentBuzzerPlayerId);
+                    if (buzzedPlayer) {
+                        statusText = `${buzzedPlayer.name} has buzzed in!`;
+                        if (buzzedPlayer.id === myPlayerId) {
+                            statusText += " (Your turn to answer)";
+                        }
+                    }
+                }
+            } else if (game.gameStarted && game.answeredCluesCount < totalClues) {
+                statusText = `${activePlayer ? activePlayer.name : 'A player'}'s turn to pick a question`;
+            }
+
+            scoreDisplayElement.innerHTML = mainText + (statusText ? `<span class="status-text">${statusText}</span>` : "");
+        }
+
+
+        // Generates the board HTML based on game.boardState, but doesn't add click listeners yet.
+        // `updateBoardInteractiveState()` will add/remove listeners dynamically.
+        function generateBoard() {
+            if (!boardElement) return;
+            boardElement.innerHTML = '';
+            // Assuming categories structure is consistent and known client-side for display
+            const numCategories = 6; // Hardcoded for fixed board size
+            const numCluesPerCat = 5;
+
+            // Add category headers
+            const categoryNames = ['Food Safety', 'GMPs', 'FSMA', 'Allergens', 'HACCP', 'Chocolate'];
+            boardElement.style.gridTemplateColumns = `repeat(${numCategories}, 1fr)`;
+            categoryNames.forEach(catName => {
+                const d = document.createElement('div');
+                d.className = 'category';
+                d.textContent = catName;
+                boardElement.appendChild(d);
+            });
+
+            // Add clue cards
+            for (let r = 0; r < numCluesPerCat; r++) {
+                for (let c = 0; c < numCategories; c++) {
+                    const value = (r + 1) * 200; // Values: 200, 400, ..., 1000
+                    const id = `card-${c}-${r}`;
+                    const key = `${c}-${r}`;
+
+                    const card = document.createElement('div');
+                    card.className = 'card';
+                    card.id = id;
+                    card.dataset.catIndex = c;
+                    card.dataset.rowIndex = r;
+                    card.dataset.value = value;
+                    card.dataset.stateKey = key;
+
+                    const inner = document.createElement('div');
+                    inner.className = 'card-inner';
+
+                    const front = document.createElement('div');
+                    front.className = 'card-face card-front';
+                    front.textContent = `$${value}`;
+
+                    const back = document.createElement('div');
+                    back.className = 'card-face card-back';
+                    back.innerHTML = `<div class="question-text"></div><div class="judge-buttons" style="display: none;"><button class="correct-btn">Correct</button><button class="wrong-btn">Wrong</button></div>`;
+
+                    inner.appendChild(front);
+                    inner.appendChild(back);
+                    card.appendChild(inner);
+                    boardElement.appendChild(card);
+
+                    // Apply any immediate styling based on server's boardState
+                    const state = game.boardState[key];
+                    if (state) {
+                        if (state.state === 'correct') {
+                            card.classList.add('disabled', 'correct');
+                            front.textContent = '';
+                            front.classList.add('empty-value');
+                            card.classList.add('flipped');
+                        } else if (state.state === 'wrong') {
+                            card.classList.add('disabled', 'wrong');
+                            front.textContent = '';
+                            front.classList.add('empty-value');
+                            card.classList.add('flipped');
+                        }
+                        if (state.isDailyDouble) {
+                            card.classList.add('daily-double-marker');
+                        }
+                    }
+                }
+            }
+            boardElement.style.display = 'grid';
+            updateBoardInteractiveState(); // Set initial interactivity
+        }
+
+        function handleHostPlayerSelection(event) {
+            const selectedPlayerCard = event.currentTarget;
+            const selectedPlayerId = selectedPlayerCard.dataset.playerId;
+            if (!game.gameStarted || !selectedPlayerId) return;
+            if (finalJeopardySectionElement.style.display !== 'none' || game.activeCardKey !== null) {
+                alert("Cannot change player while a question is active or Final Jeopardy is ongoing. Please resolve the active question first.");
+                return;
+            }
+            // Send request to server to set active player
+            socket.emit('manualSetActivePlayer', selectedPlayerId);
+        }
+
+        // --- Game State & UI Management ---
+
+        // The loadGameProgress function is largely replaced by socket.on('gameStateUpdate')
+        // However, we need a simplified `updateUIbasedOnGameState` that reacts to the server's state.
+        function updateUIbasedOnGameState() {
+            const pSE = document.getElementById('player-setup');
+            if (!scorePanelElement || !boardElement || !startGameBtnElement || !resetScoresBtnElement || !newGameBtnElement || !showFinalJeopardyBtnElement || !finalJeopardySectionElement) {
+                console.error("Required UI elements missing."); return;
+            }
+            hideQuestionDisplay();
+
+            if (game.gameStarted) {
+                if (pSE) pSE.style.display = 'none';
+                scorePanelElement.style.display = 'flex';
+                boardElement.style.display = 'grid';
+
+                const isFJActive = finalJeopardySectionElement.style.display === 'block';
+                if (!isFJActive) {
+                    generateBoard(); // Re-render board based on updated `game.boardState`
+                    showFinalJeopardyBtnElement.disabled = (game.answeredCluesCount < totalClues);
+
+                    if(victoryElement) victoryElement.style.display = 'none';
+                } else {
+                    boardElement.style.display = 'none';
+                    showFinalJeopardyBtnElement.disabled = true;
+                }
+
+                updatePlayerCards();
+                updateScoreDisplay();
+                startGameBtnElement.disabled = true;
+                resetScoresBtnElement.disabled = false;
+                newGameBtnElement.disabled = false;
+            } else {
+                // Game not started or reset state
+                if (pSE) pSE.style.display = 'flex';
+                scorePanelElement.style.display = 'none';
+                boardElement.style.display = 'none';
+                updatePlayerCards();
+                updateScoreDisplay();
+                startGameBtnElement.disabled = game.players.length === 0;
+                resetScoresBtnElement.disabled = true;
+                undoBtnElement.disabled = true;
+                showFinalJeopardyBtnElement.disabled = true;
+                finalJeopardySectionElement.style.display = 'none';
+                if(victoryElement) victoryElement.style.display = 'none';
+                if(musicElement) musicElement.pause();
+            }
+            updateBoardInteractiveState(); // Always re-evaluate board interactivity
+            drawScoreHistoryChart();
+        }
+
+        // Setup Final Jeopardy UI on client, triggered by server event
+        function setupFinalJeopardy() {
+            if (!finalCategoryElement || !finalQuestionElement || !revealFinalQuestionBtnElement || !submitFinalWagersBtnElement || !judgeFinalAnswersBtnElement || !finalWagersContainerElement || !finalJeopardySectionElement ) {
+                console.error("Final Jeopardy UI elements missing."); return;
+            }
+            console.log("Client setting up Final Jeopardy...");
+            hideQuestionDisplay();
+            // Client doesn't disable player selection mode itself, server does.
+
+            // Ensure player wagers are visible if client connects late
+            finalWagersContainerElement.innerHTML = '';
+            game.players.filter(p => p.score > 0).forEach(p => {
+                const r = document.createElement('div');
+                r.className = 'wager-row';
+                const l = document.createElement('label');
+                l.htmlFor = `wager-${p.id}`;
+                l.textContent = `${p.name} ($${p.score}):`;
+                const i = document.createElement('input');
+                i.type = 'number';
+                i.id = `wager-${p.id}`;
+                i.dataset.playerId = p.id;
+                i.min = 0;
+                i.max = p.score;
+                i.placeholder = 'Enter wager';
+                i.required = true;
+                // Only enable input for THIS client's player, if they are eligible
+                if (p.id !== myPlayerId) {
+                     i.disabled = true; // Other players' inputs are disabled on this client
+                }
+                r.appendChild(l);
+                r.appendChild(i);
+                finalWagersContainerElement.appendChild(r);
+            });
+
+            boardElement.style.display = 'none';
+            scorePanelElement.style.display = 'none';
+            victoryElement.style.display = 'none';
+            finalJeopardySectionElement.style.display = 'block';
+            showFinalJeopardyBtnElement.disabled = true;
+
+            // UI state for FJ is controlled by server's 'finalQuestionRevealed', 'wagersLockedIn', etc.
+            finalCategoryElement.textContent = `Category: ${game.finalJeopardyData?.category || 'Loading...'}`;
+            finalQuestionElement.textContent = game.finalJeopardyData?.question || 'Question text...';
+            finalQuestionElement.style.display = 'none'; // Initially hidden
+            revealFinalQuestionBtnElement.style.display = 'inline-block';
+            submitFinalWagersBtnElement.style.display = 'none';
+            judgeFinalAnswersBtnElement.style.display = 'none';
+        }
+
+        // --- High Scores & Tabs ---
+        function renderHighScores() { if (!highScoresListElement) return; try { const scores = JSON.parse(localStorage.getItem(STORAGE_KEY_SCORES) || '[]'); const sortedScores = scores.sort((a, b) => b.score - a.score).slice(0, 10); if (sortedScores.length === 0) highScoresListElement.innerHTML = '<li>No high scores recorded yet.</li>'; else highScoresListElement.innerHTML = sortedScores.map((s, i) => `<li><span>${i + 1}. ${s.name} (${new Date(s.date || Date.now()).toLocaleDateString()})</span><span>$${s.score}</span></li>`).join(''); } catch (e) { console.error("Error loading/rendering high scores:", e); highScoresListElement.innerHTML = '<li>Error loading scores.</li>'; } }
+        function saveScoresToHighScores() { const scoresToSave = game.players.map(p => ({ name: p.name, score: p.score, date: Date.now() })); if (scoresToSave.length === 0) return; try { const existingScores = JSON.parse(localStorage.getItem(STORAGE_KEY_SCORES) || '[]'); const updatedScores = [...existingScores, ...scoresToSave]; localStorage.setItem(STORAGE_KEY_SCORES, JSON.stringify(updatedScores)); renderHighScores(); alert("Current game scores saved to High Scores!"); if (resultsModalElement) resultsModalElement.classList.remove('show'); const highScoresTabButton = document.querySelector('.tab-button[data-tab="high-scores-tab"]'); if(highScoresTabButton) highScoresTabButton.click(); } catch (e) { console.error("Error saving scores to high scores:", e); alert("Failed to save scores."); } }
+        function setupTabs() { const tabButtons = document.querySelectorAll('.tab-button'); const tabContents = document.querySelectorAll('.tab-content'); tabButtons.forEach(button => { button.addEventListener('click', () => { const targetTabId = button.dataset.tab; if (!targetTabId) return; tabButtons.forEach(btn => btn.classList.remove('active')); tabContents.forEach(content => content.classList.remove('active')); button.classList.add('active'); const activeContent = document.getElementById(targetTabId); if (activeContent) { activeContent.classList.add('active'); if (targetTabId === 'score-history-tab') drawScoreHistoryChart(); else if (targetTabId === 'high-scores-tab') renderHighScores(); } else console.warn("Tab content not found for ID:", targetTabId); }); }); const initialActiveButton = document.querySelector('.tab-button.active'); if (initialActiveButton) { const initialTabId = initialActiveButton.dataset.tab; const initialContent = document.getElementById(initialTabId); if(initialContent) initialContent.classList.add('active'); if (initialTabId === 'score-history-tab') drawScoreHistoryChart(); else if (initialTabId === 'high-scores-tab') renderHighScores(); } else if (tabButtons.length > 0) { tabButtons[0].click(); } }
+        function drawScoreHistoryChart() { if (!scoreHistoryChartCanvas || !chartPlaceholderText) return; const ctx = scoreHistoryChartCanvas.getContext('2d'); if (!ctx) return; if (activeChart) { activeChart.destroy(); activeChart = null; } const datasets = game.players.filter(p => game.scoreHistory[p.id] && game.scoreHistory[p.id].length > 0).map(p => { const history = game.scoreHistory[p.id] || []; const filteredHistory = [...history].sort((a, b) => a.turn - b.turn); if (filteredHistory.length === 0 || filteredHistory[0].turn !== 0) { filteredHistory.unshift({ turn: 0, score: 0 }); } const uniqueTurnHistory = []; const turnsSeen = new Set(); for (let i = filteredHistory.length - 1; i >= 0; i--) { const entry = filteredHistory[i]; if (!turnsSeen.has(entry.turn)) { uniqueTurnHistory.unshift(entry); turnsSeen.add(entry.turn); } } return { label: p.name, data: uniqueTurnHistory.map(e => ({ x: e.turn, y: e.score })), borderColor: p.color, backgroundColor: p.color + '30', fill: false, tension: 0.1 }; }); if (datasets.length > 0) { chartPlaceholderText.style.display = 'none'; scoreHistoryChartCanvas.style.display = 'block'; activeChart = new Chart(ctx, { type: 'line', data: { datasets }, options: { responsive: true, maintainAspectRatio: false, scales: { x: { type: 'linear', title: { display: true, text: 'Action Turn Number' }, beginAtZero: true, ticks: { stepSize: 1, precision: 0 } }, y: { title: { display: true, text: 'Score ($)' }, beginAtZero: false } }, plugins: { title: { display: true, text: 'Score Progression Over Turns'}, tooltip: { mode: 'index', intersect: false } }, interaction: { mode: 'nearest', axis: 'x', intersect: false } } }); } else { chartPlaceholderText.style.display = 'block'; scoreHistoryChartCanvas.style.display = 'none'; } }
+        function updateUndoButtonState() { if (undoBtnElement) undoBtnElement.disabled = game.historyStackLength === 0; } // Client asks server for history length
+        function showFinalResults() { if (!finalResultsElement || !resultsModalElement) return; const sortedPlayers = [...game.players].sort((a, b) => b.score - a.score); finalResultsElement.innerHTML = sortedPlayers.map(p => `<div>${p.name}: $${p.score}</div>`).join(''); resultsModalElement.classList.add('show'); }
+
+        // --- Event Listeners (Client-side sends events to server) ---
+        function setupEventListeners() {
+            console.log("Setting up client-side DOM event listeners...");
+
+            if(addPlayerBtnElement) {
+                addPlayerBtnElement.addEventListener('click', () => {
+                    const name = playerNameInputElement.value.trim();
+                    if (!name) { alert("Please enter a player name."); return; }
+                    socket.emit('addPlayer', name); // Send to server
+                    playerNameInputElement.value = '';
+                    playerNameInputElement.focus();
+                });
+            }
+            if(startGameBtnElement) {
+                startGameBtnElement.addEventListener('click', () => {
+                    socket.emit('startGame'); // Send to server
+                });
+            }
+            if(applyScoreBtnElement) {
+                applyScoreBtnElement.addEventListener('click', () => {
+                    if (!game.currentPlayerId || !manualScoreInputElement) return;
+                    const targetScore = parseInt(manualScoreInputElement.value, 10);
+                    if (isNaN(targetScore)) { alert("Please enter a valid number for the score."); return; }
+                    socket.emit('manualScoreUpdate', game.currentPlayerId, targetScore); // Send to server
+                    manualScoreInputElement.value = '';
+                });
+            }
+            if(undoBtnElement) undoBtnElement.addEventListener('click', () => { socket.emit('undoLastAction'); });
+            if(resetScoresBtnElement) resetScoresBtnElement.addEventListener('click', () => { if (confirm("Are you sure you want to reset all player scores to $0? This cannot be undone.")) { socket.emit('resetScores'); } });
+            if(newGameBtnElement) newGameBtnElement.addEventListener('click', () => { if (confirm("Are you sure you want to start a completely new game? All current progress (players, scores, board) will be lost.")) { socket.emit('newGame'); } });
+
+            if(musicToggleElement) musicToggleElement.addEventListener('change', () => {
+                if (musicToggleElement.checked && musicElement) {
+                    // If game started and no question active, play music.
+                    // Otherwise, the server will manage music playback.
+                    if (game.gameStarted && game.activeCardKey === null) {
+                        musicElement.play();
+                    }
+                } else if(musicElement) {
+                    musicElement.pause();
+                }
+            });
+
+            if(showFinalJeopardyBtnElement) showFinalJeopardyBtnElement.addEventListener('click', () => socket.emit('revealFinalQuestion'));
+            if(revealFinalQuestionBtnElement) revealFinalQuestionBtnElement.addEventListener('click', () => {
+                socket.emit('revealFinalQuestion'); // Send to server
+            });
+            if(submitFinalWagersBtnElement) submitFinalWagersBtnElement.addEventListener('click', () => {
+                let allValid = true;
+                const wagers = {};
+                const wagerInputs = finalWagersContainerElement?.querySelectorAll('.wager-row input[type="number"]');
+                if (!wagerInputs) return;
+                wagerInputs.forEach(input => {
+                    const playerId = input.dataset.playerId;
+                    const player = getPlayerById(playerId);
+                    const wager = parseInt(input.value, 10);
+                    const maxWager = player ? player.score : 0; // Max wager is player's current score
+
+                    // Validate wager for THIS player (myPlayerId) only if it's their input
+                    if (playerId === myPlayerId) {
+                        if (isNaN(wager) || wager < 0 || wager > maxWager) {
+                            allValid = false;
+                            input.style.border = '2px solid red';
+                        } else {
+                            input.style.border = '';
+                            wagers[playerId] = wager;
+                        }
+                    }
+                    input.disabled = true; // Disable input after submit attempt
+                });
+
+                if (!allValid) {
+                    alert("Please correct the invalid wagers (highlighted in red). Ensure they are numbers between $0 and the player's current score.");
+                    return;
+                }
+                socket.emit('submitFinalWagers', wagers); // Send wagers to server
+                submitFinalWagersBtnElement.disabled = true; // Disable button locally
+            });
+            if(judgeFinalAnswersBtnElement) judgeFinalAnswersBtnElement.addEventListener('click', () => {
+                const results = [];
+                finalWagersContainerElement?.querySelectorAll('.wager-row input[type="number"]').forEach(input => {
+                    const playerId = input.dataset.playerId;
+                    // For judging, assume all players are judged by host
+                    const isCorrect = confirm(`Did ${getPlayerById(playerId)?.name} answer the Final Jeopardy question correctly?`);
+                    results.push({ playerId: playerId, isCorrect: isCorrect });
+                });
+                socket.emit('judgeFinalAnswers', results); // Send results to server
+            });
+            if(modalCloseElement) modalCloseElement.addEventListener('click', () => { if(resultsModalElement) resultsModalElement.classList.remove('show'); });
+            if(saveHighScoresBtnElement) saveHighScoresBtnElement.addEventListener('click', saveScoresToHighScores);
+
+            // NEW: Buzzer button listener
+            if (buzzerButton) {
+                buzzerButton.addEventListener('click', () => {
+                    socket.emit('buzz'); // Send buzz event to server
+                    buzzerButton.disabled = true; // Disable locally immediately to prevent spam
+                });
+            }
+            if (noOtherTakersBtnElement) {
+                noOtherTakersBtnElement.addEventListener('click', () => {
+                    if (game.activeCardKey) {
+                        socket.emit('noOtherTakers', game.activeCardKey); // Send to server
+                    }
+                });
+            }
+        }
+
+
+        // --- Socket.IO Event Listeners (Client reacts to server messages) ---
+        function setupSocketListeners() {
+            // Connect to the server running on localhost:3000
+            // If running on a different IP/port, change 'http://localhost:3000'
+            socket = io('http://localhost:3000');
+
+            socket.on('connect', () => {
+                console.log('Connected to game server! My Socket ID:', socket.id);
+                // Prompt for player name on connection, send to server
+                // Only prompt if a player name hasn't been set or we're starting a new game
+                if (!myPlayerName || !game.gameStarted) { // Only prompt for new player or new game
+                    myPlayerName = prompt("Enter your player name for this game:");
+                    if (!myPlayerName) myPlayerName = "Guest";
+                }
+                socket.emit('playerConnect', myPlayerName);
+            });
+
+            socket.on('disconnect', () => {
+                console.log('Disconnected from game server.');
+                alert('Disconnected from the game server. Please refresh to reconnect.');
+            });
+
+            // Main game state update from server
+            socket.on('gameStateUpdate', (serverGame) => {
+                // console.log("Received game state update:", serverGame);
+                // Update client's local game state based on server's authority
+                // Deep copy objects to avoid reference issues
+                Object.assign(game, {
+                    gameStarted: serverGame.gameStarted,
+                    players: serverGame.players.map(p => ({ ...p })), // Deep copy players array
+                    currentPlayerId: serverGame.currentPlayerId,
+                    currentBuzzerPlayerId: serverGame.currentBuzzerPlayerId,
+                    boardState: JSON.parse(JSON.stringify(serverGame.boardState)), // Deep copy boardState
+                    activeCardKey: serverGame.activeCardKey,
+                    currentQuestionText: serverGame.currentQuestionText,
+                    currentWager: serverGame.currentWager,
+                    historyStackLength: serverGame.historyStackLength,
+                    answeredCluesCount: serverGame.answeredCluesCount,
+                    turnCounter: serverGame.turnCounter,
+                    scoreHistory: JSON.parse(JSON.stringify(serverGame.scoreHistory)), // Deep copy scoreHistory
+                    finalJeopardyData: serverGame.finalJeopardyData ? { ...serverGame.finalJeopardyData } : null
+                });
+
+                // Set myPlayerId based on which player in the server's list has *this client's* socket ID
+                // Note: The server's `player.socketId` is assigned as a unique `id` when a player is *added* via 'addPlayer',
+                // not the transient socket.id from the connection. This needs to be consistent.
+                const myPlayer = game.players.find(p => p.name === myPlayerName); // Rely on name for identity across sessions
+                if (myPlayer) {
+                    myPlayerId = myPlayer.id;
+                } else {
+                    myPlayerId = null; // Not currently a registered player in the game
+                }
+
+                updateUIbasedOnGameState(); // Re-render UI based on new state
+            });
+
+            socket.on('alert', (message) => alert(message));
+
+            // Server asks for a prompt (e.g., Daily Double wager)
+            socket.on('prompt', (data, callback) => {
+                const value = prompt(data.message);
+                callback(value); // Send response back to server
+            });
+
+            // Sound control from server
+            socket.on('playMusic', () => playSound('bg-music'));
+            socket.on('stopMusic', () => { if (musicElement) musicElement.pause(); });
+            socket.on('correctSound', () => playSound('correct-sound'));
+            socket.on('wrongSound', () => playSound('wrong-sound'));
+            socket.on('dailyDoubleSound', () => playSound('daily-double-sound'));
+            socket.on('finalJeopardySound', () => playSound('final-jeopardy-sound'));
+            socket.on('buzzerSound', () => playSound('buzzer-sound')); // Play buzzer sound
+
+            // Specific UI events from server
+            socket.on('questionDisplayed', (questionText, cardKey) => {
+                showQuestionDisplay(questionText);
+                // Client doesn't modify game.activeCardKey directly, but it ensures the card is flipped
+                const cardEl = document.getElementById(`card-${cardKey}`);
+                if (cardEl) {
+                    const questionTextDiv = cardEl.querySelector('.question-text');
+                    if (questionTextDiv) questionTextDiv.textContent = questionText;
+                    cardEl.classList.add('flipped');
+                }
+                speakQuestion(questionText);
+                updateBoardInteractiveState(); // Re-evaluate buzzer button state
+            });
+
+            socket.on('hideQuestionDisplay', () => {
+                hideQuestionDisplay();
+                // Ensure judge buttons are hidden
+                const judgeButtons = document.querySelectorAll('.judge-buttons');
+                judgeButtons.forEach(jb => jb.style.display = 'none');
+            });
+
+            // This event is now primarily for displaying judge controls on the designated "host" client
+            socket.on('showJudgeControls', (activeCardKey, buzzedPlayerId) => {
+                const card = document.getElementById(`card-${activeCardKey}`);
+                if (card) {
+                    const judgeButtons = card.querySelector('.judge-buttons');
+                    if (judgeButtons) {
+                        judgeButtons.style.display = 'flex';
+                        // Attach judge logic for the host (any client that is the host)
+                        const cBtn = judgeButtons.querySelector('.correct-btn');
+                        const wBtn = judgeButtons.querySelector('.wrong-btn');
+                        cBtn.onclick = (e) => { e.stopPropagation(); socket.emit('judgeAnswer', activeCardKey, true, buzzedPlayerId); };
+                        wBtn.onclick = (e) => { e.stopPropagation(); socket.emit('judgeAnswer', activeCardKey, false, buzzedPlayerId); };
+                    }
+                }
+            });
+
+            socket.on('hideJudgeControls', () => {
+                // Judge buttons are already handled by `hideQuestionDisplay` or when `activeCardKey` is null
+            });
+
+
+            // Final Jeopardy Client Listeners
+            socket.on('finalJeopardySetup', () => {
+                setupFinalJeopardy(); // Call client-side function to show FJ section
+            });
+
+            socket.on('finalQuestionRevealed', (data) => {
+                // UI changes handled in setupFinalJeopardy when triggered
+                finalCategoryElement.textContent = `Category: ${data.category}`;
+                finalQuestionElement.textContent = data.question;
+                finalQuestionElement.style.display = 'block';
+                revealFinalQuestionBtnElement.style.display = 'none';
+                submitFinalWagersBtnElement.style.display = 'inline-block';
+                submitFinalWagersBtnElement.disabled = false;
+
+                // Make sure client's own wager input is enabled
+                const myWagerInput = finalWagersContainerElement?.querySelector(`input[data-player-id="${myPlayerId}"]`);
+                if(myWagerInput) myWagerInput.disabled = false;
+            });
+
+            socket.on('wagersLockedIn', () => {
+                // All wagers received by server, display judge button for host
+                if (judgeFinalAnswersBtnElement) {
+                    judgeFinalAnswersBtnElement.style.display = 'inline-block';
+                    submitFinalWagersBtnElement.disabled = true;
+                }
+            });
+
+            socket.on('finalJeopardyAnswerRevealed', (answer) => {
+                if (finalQuestionElement && game.finalJeopardyData) {
+                    finalQuestionElement.textContent = `${game.finalJeopardyData.question} (A: ${answer})`;
+                }
+                if (judgeFinalAnswersBtnElement) judgeFinalAnswersBtnElement.style.display = 'none';
+            });
+
+            socket.on('showFinalResults', (finalPlayers) => {
+                // Update client's players array with final scores before showing modal
+                game.players = finalPlayers.map(p => ({...p}));
+                if (finalJeopardySectionElement) finalJeopardySectionElement.style.display = 'none';
+                showFinalResults();
+            });
+        }
+
+        // --- Initialization ---
+        function initializeGame() {
+            console.log("Initializing Quality Jeopardy (Multi-Player Client)...");
+            setupTabs();
+            setupEventListeners();
+            setupSocketListeners(); // Connect to Socket.IO and set up listeners
+            renderHighScores();
+            // `updateUndoButtonState()` and initial UI will be called by `gameStateUpdate` from server
+        }
+
+        // --- Start ---
+        document.addEventListener('DOMContentLoaded', initializeGame);
+
+    </script>
+     <!-- ********** END COMPLETE SCRIPT ********** -->
+
+</body>
+</html>

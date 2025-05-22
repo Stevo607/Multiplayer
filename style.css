@@ -1,0 +1,476 @@
+``css
+/* Basic reset and box-sizing */
+*,
+*::before,
+*::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+/* CSS Variables for theming */
+:root {
+    --bg: #0b2345;             /* page background */
+    --fg: #ffffff;             /* default text colour */
+    --card-bg: #1e3a8a;        /* card / category background */
+    --flip-duration: .6s;      /* Card flip animation speed */
+    --score-bg: #02132c;       /* Score panel background */
+    --correct-bg: #d4edda;     /* Background for correctly answered cards */
+    --wrong-bg: #f8d7da;       /* Background for incorrectly answered cards */
+    --jeopardy-border: 4px solid #ffeb3b; /* Potential border style */
+    --player-1-color: #4caf50;  /* Player 1 color */
+    --player-2-color: #2196f3;  /* Player 2 color */
+    --player-3-color: #ff9800;  /* Player 3 color */
+    --player-4-color: #e91e63;  /* Player 4 color */
+    --active-player-bg: rgba(255, 255, 255, 0.2); /* Active player background */
+    --disabled-card-bg: #4a4a4a;/* Added for DD visibility */
+    --selectable-player-border: 3px dashed yellow; /* For player selection during steal */
+    --pending-steal-shadow: 0 0 15px yellow; /* Glow for pending card */
+    --failed-attempt-border: 2px solid #dc3545; /* Border for failed player during steal */
+    --host-selectable-hover-bg: rgba(255, 255, 255, 0.1); /* Subtle hover for host intervention */
+    --question-display-bg: rgba(0, 0, 0, 0.2); /* Background for the new question area */
+}
+
+/* Body styles */
+body {
+    font-family: Arial, Helvetica, sans-serif;
+    line-height: 1.4;
+    background: var(--bg);
+    color: var(--fg);
+    min-height: 100vh;
+}
+
+/* -------- Layout Wrapper -------- */
+#game-controls-wrapper {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    max-width: 1000px;
+    margin: 1.5rem auto 1rem auto;
+}
+
+/* -------- Player Panel -------- */
+#player-panel {
+    background: var(--score-bg);
+    padding: 1rem; /* Keep panel padding */
+    border-radius: 8px;
+    flex: 1 1 400px;
+    max-width: 450px;
+    min-width: unset;
+}
+
+#player-setup {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+#player-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem; /* <<< REDUCED GAP between cards */
+    justify-content: center;
+    min-height: 50px; /* Keep some min height */
+}
+
+.player-card {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 0.5rem; /* <<< REDUCED PADDING inside card */
+    border-radius: 6px; /* Slightly smaller radius */
+    width: 125px; /* <<< REDUCED WIDTH */
+    position: relative;
+    transition: all 0.3s ease;
+    border: 2px solid transparent;
+    cursor: default;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    min-height: 80px; /* Add min-height to prevent collapse */
+}
+
+/* Hover/Active/Selectable styles remain the same */
+.player-card.host-selectable:hover { background-color: var(--host-selectable-hover-bg); transform: scale(1.02); }
+.player-card.active-player { background: var(--active-player-bg); border-color: #ffeb3b; box-shadow: 0 0 10px rgba(255, 255, 255, 0.3); transform: scale(1.05); }
+.player-card.active-player:hover { transform: scale(1.05); }
+.player-card.selectable-player { cursor: pointer; border: var(--selectable-player-border); opacity: 0.85; }
+.player-card.selectable-player:hover { opacity: 1; transform: scale(1.03); box-shadow: 0 0 8px yellow; background-color: var(--active-player-bg); }
+.player-card.failed-attempt { opacity: 0.5; cursor: not-allowed !important; border: var(--failed-attempt-border); }
+.player-card.failed-attempt:hover { background-color: rgba(0, 0, 0, 0.3); transform: none; }
+
+
+.player-name {
+    font-weight: bold;
+    font-size: 0.9rem; /* <<< Adjusted size */
+    margin-bottom: 0.2rem; /* <<< Adjusted spacing */
+    word-break: break-word;
+    line-height: 1.2; /* Adjust line height if names wrap */
+}
+
+.player-score {
+    font-size: 1.2rem; /* <<< Adjusted size */
+}
+
+.player-indicator {
+    position: absolute;
+    top: 4px; /* Adjust position */
+    right: 4px;
+    width: 10px; /* Smaller indicator */
+    height: 10px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+/* -------- Score panel -------- */
+#score-panel {
+    background: var(--score-bg);
+    color: var(--fg);
+    padding: 1rem;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: .75rem;
+    flex: 1 1 400px;
+    max-width: 450px;
+     min-width: 280px;
+}
+
+#score-display {
+    font-size: 1.3rem;
+    text-align: center;
+    font-weight: bold;
+    min-height: 2em;
+    background-color: rgba(0,0,0,0.2);
+    padding: 0.5rem;
+    border-radius: 4px;
+}
+ /* Style for the status text */
+#score-display .status-text {
+    display: block; /* Put on new line */
+    font-size: 0.9rem;
+    font-weight: normal;
+    color: #ffeb3b; /* Yellow text */
+    margin-top: 0.3rem;
+}
+
+
+.controls {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: .75rem;
+}
+
+/* Specific controls group for the 'No Other Takers' button */
+#steal-controls {
+    margin-top: 0.5rem; /* Add some space */
+}
+#no-other-takers-btn {
+     background-color: #6c757d; /* Greyish color */
+}
+
+/* General input/button styling */
+input[type=number],
+input[type=text],
+button {
+    padding: .4rem .6rem;
+    font-size: .9rem;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+    background-color: #fff;
+    color: #333;
+    vertical-align: middle; /* Align elements nicely on the same line */
+}
+
+/* General button styling (applied to ALL buttons) */
+button {
+    cursor: pointer;
+    background-color: var(--card-bg);
+    color: var(--fg);
+    border: 1px solid var(--fg); /* Default border */
+    transition: background-color 0.3s;
+    /* Padding and border-radius are set above */
+}
+
+button:hover:not(:disabled) {
+    background-color: #2f4c9c;
+}
+
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+input[type=number] { width: 100px; }
+input[type=checkbox] { width: auto; height: auto; margin-right: 5px; vertical-align: middle; cursor: pointer; }
+label[for="music-toggle"] { vertical-align: middle; cursor: pointer; margin-left: 0.5rem; /* Add space before Music label */ }
+
+/* -------- NEW: Question Display Area -------- */
+#question-display-area {
+    display: none; /* Hidden by default */
+    max-width: 1000px; /* Match board width */
+    margin: 1rem auto; /* Space above and below */
+    padding: 1.2rem; /* Increased padding */
+    background-color: var(--question-display-bg);
+    color: var(--fg);
+    border-radius: 8px;
+    min-height: 100px; /* Ensure it has some height */
+    text-align: left; /* Left align question text */
+}
+
+#current-question-text {
+    font-size: 1.4rem; /* Slightly larger font size */
+    line-height: 1.5;
+    max-height: 200px; /* Limit height and allow scroll if needed */
+    overflow-y: auto;
+}
+
+/* -------- Board & Card -------- */
+#board {
+    display: grid;
+    gap: 4px;
+    max-width: 1000px;
+    margin: 0 auto 1.5rem auto; /* Remove top margin, add bottom */
+}
+
+.category {
+    background: var(--card-bg);
+    padding: 1rem;
+    text-align: center;
+    font-weight: 700;
+    color: #ffeb3b;
+    cursor: default;
+    min-height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.card {
+    perspective: 1000px;
+    /* cursor: pointer; */ /* Cursor is now controlled by JS */
+    position: relative;
+    min-height: 110px;
+}
+
+.card.disabled {
+    pointer-events: none;
+    cursor: default;
+    opacity: 0.6; /* Make disabled cards slightly faded */
+}
+/* Style for card when it's open for another player */
+.card.pending-steal {
+     box-shadow: var(--pending-steal-shadow); /* Yellow glow */
+     cursor: default; /* Shouldn't be clickable directly */
+     /* pointer-events: none; */ /* Prevent clicks on the card itself */
+}
+
+.card-inner {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    transform-style: preserve-3d;
+    transition: transform var(--flip-duration);
+}
+
+.card.flipped .card-inner {
+    transform: rotateY(180deg);
+}
+
+.card-face {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    top: 0;
+    left: 0;
+    backface-visibility: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.4rem;
+    padding: .5rem;
+    border-radius: 4px;
+    overflow: hidden;
+    text-align: center;
+}
+
+.card-front {
+    background: var(--card-bg);
+    color: #ffeb3b;
+    font-weight: 700;
+}
+
+/* Style for the front of answered cards */
+.card-front.empty-value {
+    background: var(--disabled-card-bg);
+    color: #888;
+}
+ /* Style for front of cards marked DD but not answered */
+ .card.daily-double-marker .card-front {
+      /* Optional: Add a subtle visual indicator for DD */
+      /* border-left: 5px solid gold; */
+ }
+
+.card-back {
+    background: #ffffff;
+    color: #000000;
+    transform: rotateY(180deg);
+    justify-content: space-around; /* Use space-around for better vertical spacing */
+    font-size: clamp(.75rem, 1.6vw, 1.0rem); /* Font size adjusted in previous step */
+    overflow-y: auto;
+    padding: .75rem;
+    line-height: 1.3; /* Optional: Adjust line spacing */
+}
+
+.question-text { /* Text on the card back */
+    margin-bottom: 0.5rem;
+    flex-grow: 1; /* Allow question to take up space */
+    overflow-y: auto; /* Scroll if needed */
+    max-height: 75%; /* Allow slightly more height for text */
+    width: 100%; /* Ensure it takes width */
+    font-size: clamp(.75rem, 1.6vw, 1.0rem); /* Keep original size */
+}
+
+.card.correct .card-front.empty-value,
+.card.correct .card-back {
+    background: var(--correct-bg);
+    color: #155724;
+}
+
+.card.wrong .card-front.empty-value,
+.card.wrong .card-back {
+    background: var(--wrong-bg);
+    color: #721c24;
+}
+
+/* Prevent hover on disabled/pending cards */
+/* .card:not(.disabled):not(.flipped):not(.pending-steal):hover .card-front {
+    outline: 2px solid #fde047;
+    transform: scale(1.05);
+    transition: transform 0.2s ease, outline 0.2s ease;
+} */
+/* NEW: Style for cards that are clickable during the current player's turn to pick a question */
+.card.player-turn-active-card {
+    outline: 3px solid #fde047; /* Yellow glow for clickable cards */
+    transform: scale(1.02); /* Slight scale */
+    transition: transform 0.2s ease, outline 0.2s ease;
+}
+.card.player-turn-active-card:hover {
+    transform: scale(1.05); /* Enhanced hover */
+}
+
+
+.judge-buttons {
+    margin-top: auto; /* Push to bottom */
+    padding-top: .5rem;
+    display: flex;
+    gap: .5rem;
+    flex-wrap: nowrap;
+    justify-content: center;
+    flex-shrink: 0; /* Prevent shrinking */
+    width: 100%; /* Take full width */
+}
+
+.judge-buttons button {
+    /* These buttons use the general button styling now */
+     white-space: nowrap;
+     font-size: clamp(.7rem, 2vw, .9rem);
+     padding: .4rem .6rem; /* Override general padding if needed */
+}
+
+.correct-btn { background-color: #28a745; color: white; border-color: #28a745;}
+.wrong-btn { background-color: #dc3545; color: white; border-color: #dc3545; }
+
+/* -------- Other Sections -------- */
+/* #victory { display: none; ... } */ /* Victory message is removed/unused */
+#final-jeopardy { display: none; max-width: 800px; margin: 1rem auto; background: #1e3a8a; padding: 2rem; border-radius: 8px; border: var(--jeopardy-border); text-align: center; }
+#final-jeopardy h2 { color: #ffeb3b; font-size: 2rem; margin-bottom: 1rem; }
+#final-category { font-size: 1.5rem; margin-bottom: 1rem; font-weight: bold; }
+#final-question { background: #fff; color: #000; padding: 1.5rem; border-radius: 8px; margin: 1.5rem 0; font-size: 1.4rem; line-height: 1.5; }
+.final-wagers { display: flex; flex-direction: column; gap: 1rem; margin-top: 1.5rem; align-items: center; }
+.wager-row { display: flex; justify-content: center; align-items: center; gap: 1rem; width: 100%; max-width: 400px; }
+.wager-row label { flex: 1; text-align: right; font-weight: bold; }
+.wager-row input { flex: 1; max-width: 150px; }
+.modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.7); align-items: center; justify-content: center; }
+.modal.show { display: flex; }
+.modal-content { background-color: var(--score-bg); padding: 2rem; border-radius: 8px; max-width: 600px; width: 90%; position: relative; text-align: center; }
+.modal-close { position: absolute; top: 10px; right: 15px; font-size: 1.8rem; font-weight: bold; color: #aaa; cursor: pointer; transition: color 0.3s; }
+.modal-close:hover { color: #fff; }
+#final-results div { font-size: 1.2rem; margin-bottom: 0.5rem; }
+#final-results div:last-child { margin-bottom: 1.5rem; }
+#high-scores { max-width: 600px; margin: 1rem auto; background: var(--score-bg); padding: 1rem; border-radius: 8px; }
+#high-scores h2 { text-align: center; margin-bottom: 1rem; color: #ffeb3b; }
+#high-scores-list { list-style-type: decimal; margin-top: 1rem; padding-left: 2rem; }
+#high-scores-list li { display: flex; justify-content: space-between; padding: 0.5rem; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
+#high-scores-list li span:last-child { font-weight: bold; }
+.confetti { position: fixed; width: 10px; height: 10px; background-color: #f00; opacity: 0.7; z-index: 1001; animation: fall linear forwards; top: -20px; pointer-events: none; }
+@keyframes fall { to { transform: translateY(105vh) rotate(720deg); opacity: 0; } }
+
+/* Media Queries */
+@media(max-width: 1024px) { /* Adjust max-width for question area */
+     #question-display-area { max-width: 95%; }
+}
+@media(max-width: 900px) { /* Adjusted breakpoint for wrapping */
+     .tabs { justify-content: center; /* Center items when wrapped */ }
+}
+
+@media(max-width: 768px) {
+    #game-controls-wrapper { max-width: 95%; gap: 1rem; margin-top: 1rem;}
+    #player-panel, #score-panel { flex-basis: 300px; } /* Allow panels to shrink */
+    #board { gap: 3px; }
+    .category { font-size: 0.8rem; padding: 0.5rem; }
+    #game-title { font-size: 3rem; }
+     .player-card { /* width: 125px; */ padding: 0.4rem; font-size: 0.85rem; }
+     .player-score { font-size: 1.1rem; }
+     .player-list { gap: 0.4rem; } /* Reduce gap */
+    .tabs { max-width: 95%; } /* Ensure tabs container fits */
+    #current-question-text { font-size: 1.1rem; max-height: 150px;} /* Adjust question text size */
+    #question-display-area { padding: 1rem; min-height: 80px; }
+}
+@media(max-width: 650px) {
+     #game-controls-wrapper { flex-direction: column; align-items: center; }
+      #player-panel, #score-panel { max-width: 95%; width: 100%; flex-basis: auto; }
+     .category { font-size: .75rem; padding: .4rem }
+     #score-panel, #player-panel, #high-scores, #final-jeopardy { width: 95%; max-width: 95%; }
+     #game-title { font-size: 2.2rem; }
+     .player-card { width: calc(50% - 0.5rem); min-height: 70px; padding: 0.4rem; font-size: 0.8rem; }
+     .player-score { font-size: 1rem; }
+     .player-list { gap: 0.5rem; }
+     .controls { justify-content: center; gap: .5rem;}
+     input[type=number], input[type=text], button { font-size: 0.8rem; padding: 0.3rem 0.5rem; }
+     #final-question { font-size: 1.1rem; }
+     .wager-row { flex-direction: column; align-items: center; gap: 0.5rem; }
+     .wager-row label { text-align: center; margin-bottom: 0.2rem; }
+     .wager-row input { max-width: 120px; }
+     .tabs button, .tabs label, .tabs input { font-size: 0.8rem; padding: 0.4rem 0.6rem; margin-bottom: 0.3rem; }
+     .judge-buttons button { font-size: 0.7rem; padding: 0.3rem 0.4rem; }
+     #current-question-text { font-size: 1rem; max-height: 120px;} /* Further adjust question text */
+     #question-display-area { padding: 0.8rem; min-height: 70px;}
+}
+
+/* Title Font */
+@import url("https://fonts.googleapis.com/css2?family=Orbitron:wght@900&display=swap");
+#game-title { font-family: 'Orbitron', sans-serif; font-weight: 900; font-size: 4rem; color: gold; text-align: center; margin: 1rem 0; text-shadow: 2px 2px 4px rgba(0, 0, 0, .7); }
+
+/* Combined Tabs & Global Controls Container */
+.tabs { display: flex; justify-content: center; align-items: center; gap: 0.75rem; margin: 1rem auto; max-width: 900px; flex-wrap: wrap; padding: 0 0.5rem; }
+.tab-button { border-radius: 4px; border-bottom: 1px solid var(--fg); padding: 0.5rem 1rem; background: #2f4c9c; border-color: var(--fg); }
+.tab-button:not(.active) { background: var(--card-bg); }
+.tab-button:hover { background: #3b5998; }
+#show-final-jeopardy {}
+.tabs label[for="music-toggle"] {}
+.tabs input[type="checkbox"]#music-toggle {}
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Score History Chart */
+#score-history-chart-container { min-height: 300px; background: rgba(0, 0, 0, 0.2); display: flex; align-items: center; justify-content: center; color: #ccc; border-radius: 8px; margin-top: 1rem; padding: 1rem; position: relative; }
+#score-history-chart { display: block; max-width: 100%; }
+#chart-placeholder-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
+
+```
